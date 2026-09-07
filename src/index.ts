@@ -34,7 +34,7 @@ app.get('/', (req: Request, res: Response) => {
 // GET /api/markets
 // Fetch all active markets with their liquidity and current premium
 app.get('/api/markets', async (req: Request, res: Response) => {
-  const network = (req.query.network as string) || 'devnet';
+  const network = (req.query.network as string) || 'testnet';
   try {
     const markets = await prisma.market.findMany({
       where: { network },
@@ -51,7 +51,7 @@ app.get('/api/markets', async (req: Request, res: Response) => {
 // Fetch positions and trade history for a specific wallet
 app.get('/api/portfolio/:wallet', async (req: Request, res: Response) => {
   const wallet = req.params.wallet as string;
-  const network = (req.query.network as string) || 'devnet';
+  const network = (req.query.network as string) || 'testnet';
   
   if (!wallet) {
     return res.status(400).json({ success: false, error: 'Wallet address is required' });
@@ -124,6 +124,60 @@ app.get('/api/stocks/change', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/markets/:id/writers
+// Fetch an available writer for a specific market
+app.get('/api/markets/:id/writers', async (req: Request, res: Response) => {
+  const marketId = req.params.id as string;
+  const network = (req.query.network as string) || 'testnet';
+  
+  if (!marketId) {
+    return res.status(400).json({ success: false, error: 'Market ID is required' });
+  }
+
+  try {
+    // Find an open written position for this market
+    const openPosition = await prisma.optionPosition.findFirst({
+      where: { 
+        marketId: marketId, 
+        network: network,
+        positionType: 'WRITTEN'
+      },
+      orderBy: { createdAt: 'asc' } // Oldest first
+    });
+
+    if (openPosition) {
+      res.json({ success: true, data: { writer: openPosition.ownerAddress } });
+    } else {
+      res.json({ success: true, data: null });
+    }
+  } catch (error) {
+    logger.error('Error fetching writers:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch writers' });
+  }
+});
+
+// POST /api/rpc
+// Proxy RPC requests to the configured node to hide API keys from the frontend
+app.post('/api/rpc', async (req: Request, res: Response) => {
+  const rpcUrl = process.env.RPC_URL as string;
+  
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(req.body)
+    });
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    logger.error(`RPC Proxy Error: ${error.message}`);
+    res.status(500).json({ error: 'RPC proxy error' });
+  }
+});
+
 // Start the server and Indexer
 app.listen(PORT, () => {
   logger.info(`🚀 Citadelle API Server running on port ${PORT}`);
@@ -134,6 +188,4 @@ app.listen(PORT, () => {
   }).catch(err => {
     logger.error('❌ Failed to start background indexer:', err);
   });
-
-
 });
