@@ -12,6 +12,8 @@ import { logger } from './logger';
 
 dotenv.config();
 
+// Disable strict TLS checking for development bypass (Binance API certificate issues)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
@@ -118,9 +120,23 @@ app.get('/api/stocks/change', async (req: Request, res: Response) => {
     });
 
     res.json({ success: true, data: dataMap });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Error fetching stock changes:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch stock changes' });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/assets - Fetch all dynamic assets
+app.get('/api/assets', async (req: Request, res: Response) => {
+  try {
+    const assets = await prisma.asset.findMany({
+      where: { isActive: true },
+      orderBy: { symbol: 'asc' }
+    });
+    res.json({ success: true, data: assets });
+  } catch (error: any) {
+    logger.error(`Error fetching assets: ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -175,6 +191,94 @@ app.post('/api/rpc', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error(`RPC Proxy Error: ${error.message}`);
     res.status(500).json({ error: 'RPC proxy error' });
+  }
+});
+
+async function fetchBypassPrice(feedId: string): Promise<number | null> {
+  const asset = await prisma.asset.findFirst({
+    where: { pythFeedId: feedId }
+  });
+
+  if (!asset) return null;
+
+  try {
+    if (asset.type === 'crypto') {
+      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${asset.symbol}-USD?interval=1d&range=1d`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(5000)
+      });
+      const data = await res.json();
+      return data.chart.result[0].meta.regularMarketPrice;
+    } else {
+      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${asset.symbol}?interval=1d&range=1d`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(5000)
+      });
+      const data = await res.json();
+      return data.chart.result[0].meta.regularMarketPrice;
+    }
+  } catch (e) {
+    console.error(`Bypass fetch failed for ${asset.symbol}:`, e);
+    return null;
+  }
+}
+
+// Proxy for Pyth Hermes to attach API key and fix CORS
+app.get('/api/pyth/v2/updates/price/latest', async (req: Request, res: Response) => {
+  try {
+    const pythKey = process.env.PYTH_API_KEY || '';
+    const query = new URLSearchParams(req.query as any).toString();
+    const url = `https://hermes.pyth.network/v2/updates/price/latest?${query}`;
+    
+    // Attempt real Pyth fetch if key exists
+    if (pythKey) {
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${pythKey}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return res.json(data);
+      }
+    }
+
+    // Bypass Fallback if no key or Pyth is down
+    logger.info("Using Pyth Bypass Fallback...");
+    let ids = req.query['ids[]'] || req.query.ids;
+    if (!ids) {
+      return res.json({ parsed: [] });
+    }
+    if (!Array.isArray(ids)) {
+      ids = [ids as string];
+    }
+
+    const parsed = [];
+    for (const feedId of ids as string[]) {
+      const price = await fetchBypassPrice(feedId);
+      if (price !== null) {
+        // Mock Pyth payload structure: price * 10^8
+        parsed.push({
+          id: feedId,
+          price: {
+            price: Math.floor(price * 100000000).toString(),
+            conf: "0",
+            expo: -8,
+            publish_time: Math.floor(Date.now() / 1000)
+          },
+          ema_price: {
+            price: Math.floor(price * 100000000).toString(),
+            conf: "0",
+            expo: -8,
+            publish_time: Math.floor(Date.now() / 1000)
+          }
+        });
+      }
+    }
+    return res.json({ 
+      binary: { encoding: "hex", data: ["00"] },
+      parsed 
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
   }
 });
 

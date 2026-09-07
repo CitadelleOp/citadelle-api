@@ -8,6 +8,15 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model Asset {
+  id         String   @id @default(uuid())
+  symbol     String   @unique
+  type       String   // "crypto" or "stock"
+  pythFeedId String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
 model Market {
   id              String            @id @default(uuid())
   engineAddress   String            // EVM Engine Contract Address managing this market
