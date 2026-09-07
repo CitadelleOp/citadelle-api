@@ -10,11 +10,14 @@ datasource db {
 
 model Asset {
   id         String   @id @default(uuid())
-  symbol     String   @unique
+  symbol     String
   type       String   // "crypto" or "stock"
   pythFeedId String?
+  network    String   @default("testnet")
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
+
+  @@unique([symbol, network])
 }
 
 model Market {
@@ -36,7 +39,7 @@ model Market {
   positions       OptionPosition[]
   trades          TradeHistory[]
 
-  @@unique([symbol, strike, expiry, collateralToken])
+  @@unique([symbol, strike, expiry, collateralToken, network])
 }
 
 model OptionPosition {
@@ -73,6 +76,7 @@ model SystemLog {
   level       String
   message     String
   environment String   // "dev" or "prod"
+  network     String   @default("testnet")
   metadata    Json?
   createdAt   DateTime @default(now())
 }

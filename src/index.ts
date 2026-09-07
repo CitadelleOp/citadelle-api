@@ -128,9 +128,10 @@ app.get('/api/stocks/change', async (req: Request, res: Response) => {
 
 // GET /api/assets - Fetch all dynamic assets
 app.get('/api/assets', async (req: Request, res: Response) => {
+  const network = (req.query.network as string) || 'testnet';
   try {
     const assets = await prisma.asset.findMany({
-      where: { isActive: true },
+      where: { isActive: true, network },
       orderBy: { symbol: 'asc' }
     });
     res.json({ success: true, data: assets });
