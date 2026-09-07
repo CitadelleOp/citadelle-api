@@ -1,0 +1,26 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# AI Skills
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+/scripts
+*keypair*.json
+deployer*.json
+
+# Logs & Build Output
+logs/
+*.log
+dist/
+coverage/
+
+# Environment
+.env.*
+
+# OS
+.DS_Store
