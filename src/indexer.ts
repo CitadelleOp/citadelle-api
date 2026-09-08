@@ -21,6 +21,7 @@ const client = createPublicClient({
 
 const OptionWrittenEvent = parseAbiItem('event OptionWritten(address indexed writer, string marketSymbol, uint256 strikePrice, uint256 expiry, address indexed collateralToken, uint256 premium)');
 const OptionBoughtEvent = parseAbiItem('event OptionBought(address indexed buyer, string marketSymbol, uint256 strikePrice, uint256 expiry, address indexed collateralToken, uint256 premium)');
+const OptionClosedEvent = parseAbiItem('event OptionClosed(address indexed user, string positionId, address indexed collateralToken, uint256 marginUnlocked)');
 
 export async function startIndexer() {
   if (ENGINE_CONTRACT_ADDRESS) {
@@ -176,6 +177,32 @@ export async function startIndexer() {
             }
 
             logger.info(`✅ Logged BUY & Liquidity Absorbed for ${buyer} in tx ${log.transactionHash}`);
+          }
+        }
+      }
+    });
+
+    client.watchEvent({
+      address: ENGINE_CONTRACT_ADDRESS as `0x${string}`,
+      event: OptionClosedEvent,
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          logger.info(`\n🔔 OptionClosed Event Detected: ${log.transactionHash}`);
+          const { user, positionId, collateralToken, marginUnlocked } = log.args as any;
+
+          if (!positionId || !user) continue;
+
+          try {
+            await prisma.optionPosition.update({
+              where: { id: positionId },
+              data: {
+                status: 'CLOSED',
+                quantity: 0
+              }
+            });
+            logger.info(`✅ Marked position ${positionId} as CLOSED for ${user}`);
+          } catch (e) {
+            logger.error(`Failed to close position ${positionId} in DB:`, e);
           }
         }
       }

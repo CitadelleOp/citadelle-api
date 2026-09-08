@@ -7,6 +7,8 @@ import dotenv from 'dotenv';
 import https from 'https';
 import cron from 'node-cron';
 import { startIndexer } from './indexer';
+import { privateKeyToAccount } from 'viem/accounts';
+import { keccak256, encodePacked, parseEther } from 'viem';
 
 import { logger } from './logger';
 
@@ -82,6 +84,58 @@ app.get('/api/portfolio/:wallet', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error fetching portfolio:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch portfolio' });
+  }
+});
+
+// POST /api/positions/:id/close-signature
+// Generate a signature for closing an option position
+app.post('/api/positions/:id/close-signature', async (req: Request, res: Response) => {
+  const positionId = req.params.id as string;
+  try {
+    const position = await prisma.optionPosition.findUnique({
+      where: { id: positionId }
+    });
+
+    if (!position) {
+      return res.status(404).json({ success: false, error: 'Position not found' });
+    }
+
+    if (position.status === 'CLOSED' || position.quantity === 0) {
+      return res.status(400).json({ success: false, error: 'Position already closed' });
+    }
+
+    const backendSignerKey = process.env.BACKEND_SIGNER_PRIVATE_KEY as `0x${string}`;
+    if (!backendSignerKey) {
+      logger.error('BACKEND_SIGNER_PRIVATE_KEY not set');
+      return res.status(500).json({ success: false, error: 'Internal server configuration error' });
+    }
+
+    const account = privateKeyToAccount(backendSignerKey);
+    const marginToUnlock = parseEther(position.quantity.toString()); // Assuming 1 quantity = 1 ether of margin or properly calculated margin
+
+    // The message hash includes msg.sender (owner), positionId, collateralToken, marginToUnlock
+    const messageHash = keccak256(
+      encodePacked(
+        ['address', 'string', 'address', 'uint256'],
+        [position.ownerAddress as `0x${string}`, position.id, position.collateralToken as `0x${string}`, marginToUnlock]
+      )
+    );
+
+    const signature = await account.signMessage({
+      message: { raw: messageHash }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        signature,
+        marginToUnlock: marginToUnlock.toString(),
+        collateralToken: position.collateralToken
+      }
+    });
+  } catch (error) {
+    logger.error(`Error generating signature for position ${positionId}:`, error);
+    res.status(500).json({ success: false, error: 'Failed to generate signature' });
   }
 });
 
