@@ -25,7 +25,8 @@ const OptionClosedEvent = parseAbiItem('event OptionClosed(address indexed user,
 
 export async function startIndexer() {
   if (ENGINE_CONTRACT_ADDRESS) {
-    logger.info(`🔌 Connecting to EVM RPC at ${RPC_URL}`);
+    //logger.info(`🔌 Connecting to EVM RPC at ${RPC_URL}`);
+    logger.info(`🔌 Connecting to EVM RPC at`);
     logger.info(`📡 Listening for EVM events on Engine: ${ENGINE_CONTRACT_ADDRESS} [Network: ${INDEXER_NETWORK}]`);
 
     client.watchEvent({

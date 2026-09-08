@@ -292,12 +292,36 @@ app.get('/api/pyth/v2/updates/price/latest', async (req: Request, res: Response)
       });
       if (response.ok) {
         const data = await response.json();
+        
+        // Log requested prices so user sees live activity for currently viewed assets
+        try {
+          if (data && data.parsed) {
+            let ids = req.query['ids[]'] || req.query.ids;
+            if (ids && !Array.isArray(ids)) ids = [ids as string];
+            if (ids && ids.length > 0) {
+              const activeAssets = await prisma.asset.findMany({
+                where: { pythFeedId: { in: ids as string[] } }
+              });
+              
+              const logParts = data.parsed.map((feed: any) => {
+                const price = feed.price.price * (10 ** feed.price.expo);
+                const asset = activeAssets.find(a => a.pythFeedId === feed.id);
+                return asset ? `${asset.symbol}: $${price.toFixed(4)}` : `Feed[${feed.id.slice(0,6)}]: $${price.toFixed(4)}`;
+              });
+              
+              if (logParts.length > 0) {
+                logger.info(`📈 Live Ticker: ${logParts.join(' | ')}`);
+              }
+            }
+          }
+        } catch (err) {}
+        
         return res.json(data);
       }
     }
 
     // Bypass Fallback if no key or Pyth is down
-    logger.info("Using Pyth Bypass Fallback...");
+    // logger.info("Using Pyth Bypass Fallback...");
     let ids = req.query['ids[]'] || req.query.ids;
     if (!ids) {
       return res.json({ parsed: [] });
@@ -307,9 +331,19 @@ app.get('/api/pyth/v2/updates/price/latest', async (req: Request, res: Response)
     }
 
     const parsed = [];
+    const logParts = [];
+    
+    // We already have activeAssets lookup, let's just do it individually here
     for (const feedId of ids as string[]) {
       const price = await fetchBypassPrice(feedId);
       if (price !== null) {
+        
+        // Find asset to log
+        try {
+          const asset = await prisma.asset.findFirst({ where: { pythFeedId: feedId } });
+          if (asset) logParts.push(`${asset.symbol}: $${price.toFixed(4)}`);
+        } catch(e) {}
+        
         // Mock Pyth payload structure: price * 10^8
         parsed.push({
           id: feedId,
@@ -328,6 +362,11 @@ app.get('/api/pyth/v2/updates/price/latest', async (req: Request, res: Response)
         });
       }
     }
+    
+    if (logParts.length > 0) {
+      logger.info(`📈 Live Ticker (Bypass): ${logParts.join(' | ')}`);
+    }
+    
     return res.json({ 
       binary: { encoding: "hex", data: ["00"] },
       parsed 
