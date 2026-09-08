@@ -111,8 +111,29 @@ app.post('/api/positions/:id/close-signature', async (req: Request, res: Respons
     }
 
     const account = privateKeyToAccount(backendSignerKey);
-    const marginToUnlock = parseEther(position.quantity.toString()); // Assuming 1 quantity = 1 ether of margin or properly calculated margin
-
+    let marginToUnlock = 0n;
+    if (position.positionType === 'WRITTEN') {
+      const { createPublicClient, http } = require('viem');
+      const publicClient = createPublicClient({ transport: http(process.env.RPC_URL) });
+      const vaultAddress = process.env.VAULT_CONTRACT_ADDRESS as `0x${string}`;
+      marginToUnlock = await publicClient.readContract({
+        address: vaultAddress,
+        abi: [{
+          "inputs": [
+            { "internalType": "address", "name": "", "type": "address" },
+            { "internalType": "address", "name": "", "type": "address" }
+          ],
+          "name": "lockedMargins",
+          "outputs": [
+            { "internalType": "uint256", "name": "", "type": "uint256" }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        }],
+        functionName: 'lockedMargins',
+        args: [position.ownerAddress as `0x${string}`, position.collateralToken as `0x${string}`]
+      }) as bigint;
+    }
     // The message hash includes msg.sender (owner), positionId, collateralToken, marginToUnlock
     const messageHash = keccak256(
       encodePacked(
